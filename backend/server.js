@@ -10,7 +10,6 @@ import orderRoutes from './routes/orderRoutes.js';
 dotenv.config();
 
 const app = express();
-const cors = require('cors');
 
 // Middleware
 app.use(cors());
