@@ -20,7 +20,7 @@ const ProductDetails = () => {
   useEffect(() => {
     const fetchProductDetails = async () => {
       try {
-        const { data } = await axios.get(`http://localhost:5000/api/products/${id}`);
+        const { data } = await axios.get(`https://artisanlink-jvq9.onrender.com/api/products/${id}`);
         setProduct(data);
         setLoading(false);
       } catch (err) {

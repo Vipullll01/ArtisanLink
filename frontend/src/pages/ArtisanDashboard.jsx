@@ -33,7 +33,7 @@ const ArtisanDashboard = () => {
   const fetchMyProducts = async () => {
     if (!userInfo?.token) return;
     try {
-      const res = await fetch('http://localhost:5000/api/products/myproducts', {
+      const res = await fetch('https://artisanlink-jvq9.onrender.com/api/products/myproducts', {
         headers: { Authorization: `Bearer ${userInfo.token}` },
       });
       const data = await res.json();

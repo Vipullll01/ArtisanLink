@@ -20,7 +20,7 @@ const Shop = () => {
   useEffect(() => {
     const fetchProducts = async () => {
       try {
-        const { data } = await axios.get('http://localhost:5000/api/products');
+        const { data } = await axios.get(`https://artisanlink-jvq9.onrender.com/api/products/${id}`);
         setProducts(data);
         setLoading(false);
       } catch (error) {
