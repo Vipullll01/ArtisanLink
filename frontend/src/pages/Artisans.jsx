@@ -12,7 +12,7 @@ const Artisans = () => {
   useEffect(() => {
     const fetchArtisans = async () => {
       try {
-        const { data } = await axios.get('/api/artisans');
+        const { data } = await axios.get('https://artisanlink-jvq9.onrender.com/api/artisans');
         setArtisansData(data);
         setLoading(false);
       } catch (err) {
