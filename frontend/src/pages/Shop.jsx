@@ -1,15 +1,63 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import axios from 'axios';
 import { addToCart } from '../redux/cartSlice';
 import { toggleWishlist } from '../redux/wishlistSlice';
 import { Link } from 'react-router-dom';
 
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
 const categories = ['All', 'Block Printing', 'Blue Pottery', 'Brassware', 'Leathercraft', 'Lac & Jewelry', 'Miniature Art'];
 
-const Shop = () => {
+// Extract artisan details, handling both populated objects and flat strings
+const getArtisanInfo = (product) => {
+  if (product && typeof product.artisan === 'object' && product.artisan !== null) {
+    return { name: product.artisan?.name, location: product.artisan?.location };
+  }
+  return { name: product?.artisan, location: product?.location };
+};
+
+// Normalize fetched products so every field has a usable default
+const normalizeProduct = (raw, index) => ({
+  ...raw,
+  _id: raw._id || raw.id || `product-${index}`,
+  id: raw.id || raw._id || `product-${index}`,
+  title: raw.title || 'Untitled Product',
+  image: raw.image || '',
+  category: raw.category || 'Uncategorized',
+  description: raw.description || '',
+  price: typeof raw.price === 'number' && !Number.isNaN(raw.price) ? raw.price : 0,
+});
+
+// Custom hook encapsulating product fetching with error + retry support
+const useProducts = () => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const fetchProducts = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const { data } = await axios.get(`${API_BASE_URL}/api/products/`);
+      setProducts(Array.isArray(data) ? data.map(normalizeProduct) : []);
+    } catch (err) {
+      console.error('Error fetching products from API:', err);
+      setError('Unable to load the catalog. Please check your connection and try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchProducts();
+  }, [fetchProducts]);
+
+  return { products, loading, error, refetch: fetchProducts };
+};
+
+const Shop = () => {
+  const { products, loading, error, refetch } = useProducts();
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('default');
@@ -17,51 +65,52 @@ const Shop = () => {
   const dispatch = useDispatch();
   const wishlistItems = useSelector((state) => state.wishlist?.items || []);
 
-  useEffect(() => {
-    const fetchProducts = async () => {
-      try {
-        const { data } = await axios.get(`https://artisanlink-jvq9.onrender.com/api/products/`);
-        setProducts(data);
-        setLoading(false);
-      } catch (error) {
-        console.error('Error fetching products from API:', error);
-        setLoading(false);
-      }
-    };
+  // Comprehensive Search, Filter & Sort Processing (memoized)
+  const filteredProducts = useMemo(
+    () =>
+      products
+        .filter((product) => {
+          const matchesCategory = selectedCategory === 'All' || product.category === selectedCategory;
 
-    fetchProducts();
-  }, []);
+          const { name: artisanName, location: artisanLocation } = getArtisanInfo(product);
+          const term = searchQuery.toLowerCase().trim();
 
-  // Comprehensive Search, Filter & Sort Processing
-  const filteredProducts = products
-    .filter((product) => {
-      const matchesCategory = selectedCategory === 'All' || product.category === selectedCategory;
+          const matchesSearch =
+            !term ||
+            product.title?.toLowerCase().includes(term) ||
+            product.category?.toLowerCase().includes(term) ||
+            product.description?.toLowerCase().includes(term) ||
+            (artisanName && artisanName.toLowerCase().includes(term)) ||
+            (artisanLocation && artisanLocation.toLowerCase().includes(term));
 
-      // Extract details handling both populated objects and flat strings
-      const artisanName = typeof product.artisan === 'object' ? product.artisan?.name : product.artisan;
-      const artisanLocation = typeof product.artisan === 'object' ? product.artisan?.location : product.location;
-      const term = searchQuery.toLowerCase().trim();
-
-      const matchesSearch =
-        !term ||
-        product.title?.toLowerCase().includes(term) ||
-        product.category?.toLowerCase().includes(term) ||
-        product.description?.toLowerCase().includes(term) ||
-        (artisanName && artisanName.toLowerCase().includes(term)) ||
-        (artisanLocation && artisanLocation.toLowerCase().includes(term));
-
-      return matchesCategory && matchesSearch;
-    })
-    .sort((a, b) => {
-      if (sortBy === 'low-to-high') return (a.price || 0) - (b.price || 0);
-      if (sortBy === 'high-to-low') return (b.price || 0) - (a.price || 0);
-      return 0;
-    });
+          return matchesCategory && matchesSearch;
+        })
+        .sort((a, b) => {
+          if (sortBy === 'low-to-high') return (a.price || 0) - (b.price || 0);
+          if (sortBy === 'high-to-low') return (b.price || 0) - (a.price || 0);
+          return 0;
+        }),
+    [products, selectedCategory, searchQuery, sortBy]
+  );
 
   if (loading) {
     return (
       <div style={{ ...styles.pageContainer, textAlign: 'center', paddingTop: '5rem' }}>
         <h2>Loading Jaipur Heritage Catalog...</h2>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div style={{ ...styles.pageContainer, textAlign: 'center', paddingTop: '5rem' }}>
+        <div style={styles.errorBanner} role="alert">
+          <h3 style={styles.errorTitle}>Something went wrong</h3>
+          <p style={styles.errorText}>{error}</p>
+          <button onClick={refetch} style={styles.retryBtn}>
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
@@ -120,52 +169,58 @@ const Shop = () => {
         </div>
       ) : (
         <div style={styles.grid}>
-          {filteredProducts.map((product) => {
-            const productId = product._id || product.id;
-            const artisanName = typeof product.artisan === 'object' ? product.artisan?.name : product.artisan;
-            const artisanLocation = typeof product.artisan === 'object' ? product.artisan?.location : product.location;
-
-            const isWishlisted = wishlistItems.some((item) => (item._id || item.id) === productId);
-
-            return (
-              <div key={productId} style={styles.card}>
-                <div style={styles.imageContainer}>
-                  <Link to={`/product/${productId}`} style={{ display: 'block', height: '100%' }}>
-                    <img src={product.image} alt={product.title} style={styles.image} />
-                  </Link>
-                  <span style={styles.badge}>{product.category}</span>
-                  <button
-                    onClick={() => dispatch(toggleWishlist(product))}
-                    style={{
-                      ...styles.wishlistIconBtn,
-                      color: isWishlisted ? '#DC2626' : '#6B7280',
-                    }}
-                    aria-label="Toggle Wishlist"
-                  >
-                    {isWishlisted ? '♥' : '♡'}
-                  </button>
-                </div>
-
-                <div style={styles.cardBody}>
-                  <Link to={`/product/${productId}`} style={{ textDecoration: 'none', color: 'inherit' }}>
-                    <h3 style={styles.productTitle}>{product.title}</h3>
-                  </Link>
-                  <p style={styles.artisanText}>
-                    Crafted by <strong>{artisanName || 'Jaipur Artisan'}</strong> {artisanLocation ? `• ${artisanLocation}` : ''}
-                  </p>
-
-                  <div style={styles.cardFooter}>
-                    <span style={styles.price}>₹{product.price?.toLocaleString('en-IN')}</span>
-                    <button onClick={() => dispatch(addToCart(product))} style={styles.addBtn}>
-                      Add to Cart
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+          {filteredProducts.map((product) => (
+            <ProductCard
+              key={product._id}
+              product={product}
+              isWishlisted={wishlistItems.some((item) => (item._id || item.id) === product._id)}
+              onToggleWishlist={() => dispatch(toggleWishlist(product))}
+              onAddToCart={() => dispatch(addToCart(product))}
+            />
+          ))}
         </div>
       )}
+    </div>
+  );
+};
+
+const ProductCard = ({ product, isWishlisted, onToggleWishlist, onAddToCart }) => {
+  const { name: artisanName, location: artisanLocation } = getArtisanInfo(product);
+
+  return (
+    <div style={styles.card}>
+      <div style={styles.imageContainer}>
+        <Link to={`/product/${product._id}`} style={{ display: 'block', height: '100%' }}>
+          <img src={product.image} alt={product.title} style={styles.image} />
+        </Link>
+        <span style={styles.badge}>{product.category}</span>
+        <button
+          onClick={onToggleWishlist}
+          style={{
+            ...styles.wishlistIconBtn,
+            color: isWishlisted ? '#DC2626' : '#6B7280',
+          }}
+          aria-label="Toggle Wishlist"
+        >
+          {isWishlisted ? '♥' : '♡'}
+        </button>
+      </div>
+
+      <div style={styles.cardBody}>
+        <Link to={`/product/${product._id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+          <h3 style={styles.productTitle}>{product.title}</h3>
+        </Link>
+        <p style={styles.artisanText}>
+          Crafted by <strong>{artisanName || 'Jaipur Artisan'}</strong> {artisanLocation ? `• ${artisanLocation}` : ''}
+        </p>
+
+        <div style={styles.cardFooter}>
+          <span style={styles.price}>₹{product.price.toLocaleString('en-IN')}</span>
+          <button onClick={onAddToCart} style={styles.addBtn}>
+            Add to Cart
+          </button>
+        </div>
+      </div>
     </div>
   );
 };
@@ -183,6 +238,10 @@ const styles = {
   searchInput: { flex: 1, minWidth: '260px', padding: '0.75rem 1.25rem', borderRadius: '8px', border: '1px solid #E5E0DA', fontSize: '0.95rem', outline: 'none' },
   sortSelect: { padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid #E5E0DA', fontSize: '0.95rem', backgroundColor: '#FFFFFF', cursor: 'pointer', outline: 'none' },
   emptyState: { textAlign: 'center', padding: '4rem 2rem', backgroundColor: '#FAF8F5', borderRadius: '12px', color: '#6B7280' },
+  errorBanner: { maxWidth: '480px', margin: '0 auto', padding: '2.5rem 2rem', backgroundColor: '#FDF2F0', border: '1px solid #F3C1B3', borderRadius: '12px' },
+  errorTitle: { color: '#B42318', marginBottom: '0.5rem' },
+  errorText: { color: '#6B7280', marginBottom: '1.5rem' },
+  retryBtn: { backgroundColor: '#C85A32', color: '#FFFFFF', border: 'none', padding: '0.6rem 1.5rem', borderRadius: '6px', fontWeight: '600', cursor: 'pointer' },
   grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(270px, 1fr))', gap: '2rem' },
   card: { backgroundColor: '#FFFFFF', borderRadius: '12px', border: '1px solid #E5E0DA', overflow: 'hidden', display: 'flex', flexDirection: 'column' },
   imageContainer: { position: 'relative', height: '220px', backgroundColor: '#FAF8F5' },
